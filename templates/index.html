@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tweet Sentiment Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        #stats {
+            margin-top: 20px;
+        }
+
+        canvas {
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Real-time Tweet Sentiment Dashboard</h2>
+
+    <div id="stats">
+        <p>Total Tweets: <span id="total"></span></p>
+        <p>Positive: <span id="positive"></span></p>
+        <p>Negative: <span id="negative"></span></p>
+        <p>Neutral: <span id="neutral"></span></p>
+    </div>
+
+    <table id="tweetTable">
+        <thead>
+            <tr>
+                <th>Tweet ID</th>
+                <th>Entity</th>
+                <th>Tweet content</th>
+                <th>Sentiment</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <canvas id="sentimentChart" width="400" height="200"></canvas>
+
+    <script>
+        const ctx = document.getElementById('sentimentChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Positive', 'Negative', 'Neutral'],
+                datasets: [{
+                    label: 'Sentiment Count',
+                    data: [0, 0, 0],
+                    backgroundColor: [
+                        'rgba(75, 192, 192, 0.6)', // positive
+                        'rgba(255, 99, 132, 0.6)', // negative
+                        'rgba(201, 203, 207, 0.6)' // neutral
+                    ],
+                    borderColor: [
+                        'rgba(75, 192, 192, 1)',
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(201, 203, 207, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+
+        async function fetchData() {
+            const response = await fetch('/data');
+            const data = await response.json();
+
+            const tbody = document.querySelector('#tweetTable tbody');
+            tbody.innerHTML = '';
+
+            const sentimentCounts = {
+                Positive: 0,
+                Negative: 0,
+                Neutral: 0
+            };
+
+            data.forEach(tweet => {
+                const sentiment = tweet['Sentiment'].charAt(0).toUpperCase() + tweet['Sentiment'].slice(1).toLowerCase();
+                sentimentCounts[sentiment]++;
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${tweet['Tweet_ID']}</td>
+                    <td>${tweet['Entity']}</td>
+                    <td>${tweet['Tweet_Content']}</td>
+                    <td>${sentiment}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            document.getElementById('total').textContent = data.length;
+            document.getElementById('positive').textContent = sentimentCounts.Positive;
+            document.getElementById('negative').textContent = sentimentCounts.Negative;
+            document.getElementById('neutral').textContent = sentimentCounts.Neutral;
+
+            chart.data.datasets[0].data = [
+                sentimentCounts.Positive,
+                sentimentCounts.Negative,
+                sentimentCounts.Neutral
+            ];
+            chart.update();
+        }
+
+        setInterval(fetchData, 3000);
+        fetchData(); // Initial call
+    </script>
+</body>
+</html>

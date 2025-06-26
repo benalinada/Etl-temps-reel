@@ -1,0 +1,122 @@
+version: '3'
+
+services:
+  # Zookeeper
+  zookeeper:
+    image: zookeeper:3.7.2
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - twitter_kafka
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:6.2.6
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:9092,PLAINTEXT_EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:9092,PLAINTEXT_EXTERNAL://host.docker.internal:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - twitter_kafka
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # Création du topic Kafka
+  create_kafka_topic:
+    image: confluentinc/cp-kafka:6.2.6
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - twitter_kafka
+    command: >
+      bash -c "/usr/bin/kafka-topics --create --topic twitter_data --partitions 2 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092"
+
+  # Spark master
+  spark:
+    image: bitnami/spark:3.5
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - '8080:8080'
+    networks:
+      - twitter_kafka
+
+  # Spark worker
+  spark-worker:
+    image: bitnami/spark:3.5
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+    networks:
+      - twitter_kafka
+    volumes:
+      - ./data_consumer:/app/data_consumer
+    command: bash -c "pip install -r /app/data_consumer/requirements.txt && python /app/data_consumer/kafka_consumer.py"
+    depends_on:
+      - create_kafka_topic
+
+  # Consumer Kafka → MongoDB (host.docker.internal)
+  data-consumer:
+    build:
+      context: ./data_consumer
+    container_name: data-consumer
+    networks:
+      - twitter_kafka
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+
+  # Producteur Kafka
+  producer:
+    build:
+      context: ./data_producer
+    depends_on:
+      - create_kafka_topic
+    networks:
+      - twitter_kafka
+    volumes:
+      - ./data:/app/data
+
+  # Kafka UI Web
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8082:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+    depends_on:
+      - kafka
+    networks:
+      - twitter_kafka
+
+networks:
+  twitter_kafka:
+    driver: bridge
